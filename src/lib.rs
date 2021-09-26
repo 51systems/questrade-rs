@@ -44,7 +44,7 @@ impl Questrade {
 
     /// Creates a new API instance with the specified auth info.
     pub fn with_authentication_only(auth_info: AuthenticationInfo) -> Self {
-        with_authentication(auth_info, Client::new())
+        Questrade::with_authentication(auth_info, Client::new())
     }
 
     /// Creates a new API instance with the specified auth info.
