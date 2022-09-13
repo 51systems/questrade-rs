@@ -1,4 +1,5 @@
 use http::StatusCode;
+use reqwest;
 use thiserror::Error;
 
 /// API error types.
@@ -15,4 +16,12 @@ pub enum ApiError {
     /// Raised when a API call is made and the user isn't authenticated
     #[error("Not authenticated")]
     NotAuthenticatedError(StatusCode),
+
+    // Happens on reqwest errors
+    #[error("Network trouble: {0}")]
+    NetworkError(#[from] reqwest::Error),
+
+    // Happens on reqwest errors
+    #[error("IO trouble: {0}")]
+    IOError(#[from] std::io::Error),
 }
