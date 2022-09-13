@@ -1000,7 +1000,7 @@ pub struct AccountPosition {
 
     /// Unrealized profit/loss on this position.
     #[serde(rename = "openPnl")]
-    pub open_profit_and_loss: Number,
+    pub open_profit_and_loss: Option<Number>,
 
     /// Total cost of the position.
     #[serde(rename = "totalCost")]
@@ -1760,7 +1760,7 @@ mod tests {
                     current_price: json!(60.17).to_number(),
                     average_entry_price: json!(60.23).to_number(),
                     closed_profit_and_loss: json!(0).to_number(),
-                    open_profit_and_loss: json!(-6).to_number(),
+                    open_profit_and_loss: Some(json!(-6).to_number()),
                     total_cost: json!(6023).to_number(),
                     is_real_time: true,
                     is_under_reorg: false
@@ -1774,7 +1774,7 @@ mod tests {
                     current_price: json!(35.71).to_number(),
                     average_entry_price: json!(32.831898).to_number(),
                     closed_profit_and_loss: json!(0).to_number(),
-                    open_profit_and_loss: json!(500.789748).to_number(),
+                    open_profit_and_loss: Some(json!(500.789748).to_number()),
                     total_cost: json!(3070.750252).to_number(),
                     is_real_time: false,
                     is_under_reorg: false
