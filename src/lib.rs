@@ -11,8 +11,7 @@ use reqwest::{Client, RequestBuilder};
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Number, Value};
-use std::cell::RefCell;
-use std::error::Error;
+use tokio::sync::RwLock;
 
 type SymbolId = u32;
 type OrderId = u32;
@@ -25,7 +24,7 @@ const API_VERSION: &str = "v1";
 /// Questrade client
 pub struct Questrade {
     client: Client,
-    auth_info: RefCell<Option<AuthenticationInfo>>,
+    auth_info: RwLock<Option<AuthenticationInfo>>,
 }
 
 impl Questrade {
@@ -38,7 +37,7 @@ impl Questrade {
     pub fn with_client(client: Client) -> Self {
         Questrade {
             client,
-            auth_info: RefCell::new(None),
+            auth_info: RwLock::new(None),
         }
     }
 
@@ -51,36 +50,33 @@ impl Questrade {
     pub fn with_authentication(auth_info: AuthenticationInfo, client: Client) -> Self {
         Questrade {
             client,
-            auth_info: RefCell::new(Some(auth_info)),
+            auth_info: RwLock::new(Some(auth_info)),
         }
     }
 
     //region authentication
 
     /// Authenticates using the supplied token.
-    pub async fn authenticate(
-        &self,
-        refresh_token: &str,
-        is_demo: bool,
-    ) -> Result<(), Box<dyn Error>> {
-        self.auth_info.replace(Some(
-            AuthenticationInfo::authenticate(refresh_token, is_demo, &self.client).await?,
-        ));
-
+    pub async fn authenticate(&self, refresh_token: &str, is_demo: bool) -> Result<(), ApiError> {
+        let info = AuthenticationInfo::authenticate(refresh_token, is_demo, &self.client).await?;
+        let mut guard = self.auth_info.write().await;
+        *guard = Some(info);
         Ok(())
     }
 
     /// Retrieves the current authentication info (if set).
-    pub fn get_auth_info(&self) -> Option<AuthenticationInfo> {
-        self.auth_info.borrow().clone()
+    pub async fn get_auth_info(&self) -> Option<AuthenticationInfo> {
+        let guard = self.auth_info.read().await;
+        guard.clone()
     }
 
     /// Obtains an active authentication token or raises an error
-    fn get_active_auth(&self) -> Result<AuthenticationInfo, ApiError> {
-        self.auth_info
-            .borrow()
-            .clone()
-            .ok_or(ApiError::NotAuthenticatedError(StatusCode::UNAUTHORIZED))
+    async fn get_active_auth(&self) -> Result<AuthenticationInfo, ApiError> {
+        let opt = {
+            let guard = self.auth_info.read().await;
+            guard.clone()
+        };
+        opt.ok_or(ApiError::NotAuthenticatedError(StatusCode::UNAUTHORIZED))
     }
 
     //endregion
@@ -88,14 +84,15 @@ impl Questrade {
     //region accounts
 
     /// List all accounts associated with the authenticated user.
-    pub async fn accounts(&self) -> Result<Vec<Account>, Box<dyn Error>> {
+    pub async fn accounts(&self) -> Result<Vec<Account>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct AccountsResponse {
             accounts: Vec<Account>,
         }
 
         let response = self
-            .get_request_builder("accounts")?
+            .get_request_builder("accounts")
+            .await?
             .send()
             .await?
             .error_for_status()
@@ -112,14 +109,15 @@ impl Questrade {
         account_number: &str,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
-    ) -> Result<Vec<AccountActivity>, Box<dyn Error>> {
+    ) -> Result<Vec<AccountActivity>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct AccountActivityResponse {
             activities: Vec<AccountActivity>,
         }
 
         let response = self
-            .get_request_builder(format!("accounts/{}/activities", account_number).as_str())?
+            .get_request_builder(format!("accounts/{}/activities", account_number).as_str())
+            .await?
             .query(&[
                 ("startTime", start_time.to_rfc3339()),
                 ("endTime", end_time.to_rfc3339()),
@@ -146,7 +144,7 @@ impl Questrade {
         start_time: Option<DateTime<Utc>>,
         end_time: Option<DateTime<Utc>>,
         state: Option<OrderStateFilter>,
-    ) -> Result<Vec<AccountOrder>, Box<dyn Error>> {
+    ) -> Result<Vec<AccountOrder>, ApiError> {
         #[derive(Debug, Serialize, Deserialize)]
         struct AccountOrdersResponse {
             orders: Vec<AccountOrder>,
@@ -172,7 +170,8 @@ impl Questrade {
         }
 
         let response = self
-            .get_request_builder(format!("accounts/{}/orders", account_number).as_str())?
+            .get_request_builder(format!("accounts/{}/orders", account_number).as_str())
+            .await?
             .query(query_params.as_slice())
             .send()
             .await?
@@ -189,7 +188,7 @@ impl Questrade {
         &self,
         account_number: &str,
         order_id: OrderId,
-    ) -> Result<Option<AccountOrder>, Box<dyn Error>> {
+    ) -> Result<Option<AccountOrder>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct AccountOrdersResponse {
             orders: Vec<AccountOrder>,
@@ -198,7 +197,8 @@ impl Questrade {
         let mut response = self
             .get_request_builder(
                 format!("accounts/{}/orders/{}", account_number, order_id).as_str(),
-            )?
+            )
+            .await?
             .send()
             .await?
             .error_for_status()
@@ -219,7 +219,7 @@ impl Questrade {
         account_number: &str,
         start_time: Option<DateTime<Utc>>,
         end_time: Option<DateTime<Utc>>,
-    ) -> Result<Vec<AccountExecution>, Box<dyn Error>> {
+    ) -> Result<Vec<AccountExecution>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct AccountExecutionsResponse {
             executions: Vec<AccountExecution>,
@@ -235,7 +235,8 @@ impl Questrade {
         }
 
         let response = self
-            .get_request_builder(format!("accounts/{}/executions", account_number).as_str())?
+            .get_request_builder(format!("accounts/{}/executions", account_number).as_str())
+            .await?
             .query(query_params.as_slice())
             .send()
             .await?
@@ -248,12 +249,10 @@ impl Questrade {
     }
 
     /// Retrieves per-currency and combined balances for a specified account.
-    pub async fn account_balance(
-        &self,
-        account_number: &str,
-    ) -> Result<AccountBalances, Box<dyn Error>> {
+    pub async fn account_balance(&self, account_number: &str) -> Result<AccountBalances, ApiError> {
         let response = self
-            .get_request_builder(format!("accounts/{}/balances", account_number).as_str())?
+            .get_request_builder(format!("accounts/{}/balances", account_number).as_str())
+            .await?
             .send()
             .await?
             .error_for_status()
@@ -268,14 +267,15 @@ impl Questrade {
     pub async fn account_positions(
         &self,
         account_number: &str,
-    ) -> Result<Vec<AccountPosition>, Box<dyn Error>> {
+    ) -> Result<Vec<AccountPosition>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct AccountPositionsResponse {
             positions: Vec<AccountPosition>,
         }
 
         let response = self
-            .get_request_builder(format!("accounts/{}/positions", account_number).as_str())?
+            .get_request_builder(format!("accounts/{}/positions", account_number).as_str())
+            .await?
             .send()
             .await?
             .error_for_status()
@@ -298,7 +298,7 @@ impl Questrade {
     /// reached, the response will return delayed data.
     /// (Please check "delay" parameter in response always)
     ///
-    pub async fn market_quote(&self, ids: &[SymbolId]) -> Result<Vec<MarketQuote>, Box<dyn Error>> {
+    pub async fn market_quote(&self, ids: &[SymbolId]) -> Result<Vec<MarketQuote>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct MarketQuoteResponse {
             quotes: Vec<MarketQuote>,
@@ -307,7 +307,8 @@ impl Questrade {
         let ids = ids.iter().map(ToString::to_string).join(",");
 
         let response = self
-            .get_request_builder("markets/quotes")?
+            .get_request_builder("markets/quotes")
+            .await?
             .query(&[("ids", ids)])
             .send()
             .await?
@@ -332,14 +333,15 @@ impl Questrade {
         &self,
         prefix: &str,
         offset: u32,
-    ) -> Result<Vec<SearchEquitySymbol>, Box<dyn Error>> {
+    ) -> Result<Vec<SearchEquitySymbol>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct SymbolSearchResponse {
             symbols: Vec<SearchEquitySymbol>,
         }
 
         let response = self
-            .get_request_builder("symbols/search")?
+            .get_request_builder("symbols/search")
+            .await?
             .query(&[("prefix", prefix), ("offset", &offset.to_string())])
             .send()
             .await?
@@ -354,14 +356,15 @@ impl Questrade {
     //endregion
 
     /// Retrieves current server time.
-    pub async fn time(&self) -> Result<DateTime<Utc>, Box<dyn Error>> {
+    pub async fn time(&self) -> Result<DateTime<Utc>, ApiError> {
         #[derive(Serialize, Deserialize)]
         struct TimeResponse {
             time: DateTime<Utc>,
         }
 
         let response = self
-            .get_request_builder("time")?
+            .get_request_builder("time")
+            .await?
             .send()
             .await?
             .error_for_status()
@@ -373,8 +376,8 @@ impl Questrade {
     }
 
     /// Get a request builder for a `get` request
-    fn get_request_builder(&self, url_suffix: &str) -> Result<RequestBuilder, Box<dyn Error>> {
-        let auth_info = self.get_active_auth()?;
+    async fn get_request_builder(&self, url_suffix: &str) -> Result<RequestBuilder, ApiError> {
+        let auth_info = self.get_active_auth().await?;
 
         Ok(self
             .client
@@ -386,16 +389,15 @@ impl Questrade {
     }
 }
 
-fn wrap_error(e: reqwest::Error) -> Box<dyn Error> {
+fn wrap_error(e: reqwest::Error) -> ApiError {
     if e.is_status() {
         let status = e.status().unwrap();
 
         if status == 401 || status == 403 {
-            return Box::new(ApiError::NotAuthenticatedError(status));
+            return ApiError::NotAuthenticatedError(status);
         }
     }
-
-    Box::new(e)
+    e.into()
 }
 
 // region accounts
@@ -1000,7 +1002,7 @@ pub struct AccountPosition {
 
     /// Unrealized profit/loss on this position.
     #[serde(rename = "openPnl")]
-    pub open_profit_and_loss: Number,
+    pub open_profit_and_loss: Option<Number>,
 
     /// Total cost of the position.
     #[serde(rename = "totalCost")]
@@ -1256,13 +1258,12 @@ mod tests {
     use crate::auth::AuthenticationInfo;
     use crate::{
         Account, AccountBalance, AccountBalances, AccountExecution, AccountOrder, AccountPosition,
-        AccountStatus, AccountType, ClientAccountType, Currency, ListingExchange, MarketQuote,
-        OrderSide, OrderState, OrderTimeInForce, OrderType, Questrade, SearchEquitySymbol,
-        SecurityType, TickType,
+        AccountStatus, AccountType, ApiError, ClientAccountType, Currency, ListingExchange,
+        MarketQuote, OrderSide, OrderState, OrderTimeInForce, OrderType, Questrade,
+        SearchEquitySymbol, SecurityType, TickType,
     };
     use chrono::{FixedOffset, TimeZone, Utc};
     use reqwest::Client;
-    use std::error::Error;
     use std::time::Instant;
 
     use mockito;
@@ -1297,7 +1298,7 @@ mod tests {
 
     // region account
     #[tokio::test]
-    async fn accounts() -> Result<(), Box<dyn Error>> {
+    async fn accounts() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1332,7 +1333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_orders() -> Result<(), Box<dyn Error>> {
+    async fn account_orders() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts/123456/orders")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1498,7 +1499,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_order() -> Result<(), Box<dyn Error>> {
+    async fn account_order() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts/123456/orders/173577870")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1566,7 +1567,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_order_empty() -> Result<(), Box<dyn Error>> {
+    async fn account_order_empty() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts/123456/orders/123456")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1581,7 +1582,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_executions() -> Result<(), Box<dyn Error>> {
+    async fn account_executions() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts/26598145/executions")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1640,7 +1641,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_balance() -> Result<(), Box<dyn Error>> {
+    async fn account_balance() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts/26598145/balances")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1739,7 +1740,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_positions() -> Result<(), Box<dyn Error>> {
+    async fn account_positions() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/accounts/26598145/positions")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1760,7 +1761,7 @@ mod tests {
                     current_price: json!(60.17).to_number(),
                     average_entry_price: json!(60.23).to_number(),
                     closed_profit_and_loss: json!(0).to_number(),
-                    open_profit_and_loss: json!(-6).to_number(),
+                    open_profit_and_loss: Some(json!(-6).to_number()),
                     total_cost: json!(6023).to_number(),
                     is_real_time: true,
                     is_under_reorg: false
@@ -1774,7 +1775,7 @@ mod tests {
                     current_price: json!(35.71).to_number(),
                     average_entry_price: json!(32.831898).to_number(),
                     closed_profit_and_loss: json!(0).to_number(),
-                    open_profit_and_loss: json!(500.789748).to_number(),
+                    open_profit_and_loss: Some(json!(500.789748).to_number()),
                     total_cost: json!(3070.750252).to_number(),
                     is_real_time: false,
                     is_under_reorg: false
@@ -1789,7 +1790,7 @@ mod tests {
 
     // region market
     #[tokio::test]
-    async fn market_quote() -> Result<(), Box<dyn Error>> {
+    async fn market_quote() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/markets/quotes")
             .match_query(Matcher::UrlEncoded("ids".into(), "2434553,27725609".into()))
             .with_status(200)
@@ -1847,7 +1848,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn symbol_search() -> Result<(), Box<dyn Error>> {
+    async fn symbol_search() -> Result<(), ApiError> {
         let _m = mock("GET", "/v1/symbols/search?prefix=V&offset=0")
             .with_status(200)
             .with_header("content-type", "text/json")
@@ -1935,5 +1936,20 @@ mod tests {
         Ok(())
     }
 
+    async fn accept_future<
+        T: std::future::Future<Output = Result<Vec<SearchEquitySymbol>, ApiError>> + Send,
+    >(
+        thing: T,
+    ) {
+        let x = thing.await;
+        println!("WORKS! {:?}", x);
+    }
+
+    #[tokio::test]
+    async fn futures_are_send() -> Result<(), ApiError> {
+        let api = get_api();
+        accept_future(api.symbol_search("V", 0)).await;
+        Ok(())
+    }
     // endregion
 }

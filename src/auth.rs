@@ -1,7 +1,7 @@
+use crate::error::ApiError;
 use reqwest::header::{ACCEPT, CONTENT_LENGTH};
 use reqwest::Client;
 use serde::Deserialize;
-use std::error::Error;
 use std::ops::Add;
 use std::time::{Duration, Instant};
 
@@ -30,11 +30,11 @@ impl AuthenticationInfo {
         refresh_token: &str,
         is_demo: bool,
         client: &Client,
-    ) -> Result<AuthenticationInfo, Box<dyn Error>> {
+    ) -> Result<AuthenticationInfo, ApiError> {
         Self::refresh_access_token(refresh_token, is_demo, client).await
     }
 
-    async fn refresh(&self, client: &Client) -> Result<AuthenticationInfo, Box<dyn Error>> {
+    async fn refresh(&self, client: &Client) -> Result<AuthenticationInfo, ApiError> {
         Self::refresh_access_token(self.refresh_token.as_str(), self.is_demo, client).await
     }
 
@@ -42,7 +42,7 @@ impl AuthenticationInfo {
         refresh_token: &str,
         is_demo: bool,
         client: &Client,
-    ) -> Result<AuthenticationInfo, Box<dyn Error>> {
+    ) -> Result<AuthenticationInfo, ApiError> {
         #[derive(Deserialize, Clone, PartialEq, Debug)]
         pub struct AuthenticationInfoResponse {
             pub refresh_token: String,
