@@ -11,6 +11,7 @@ use reqwest::{Client, RequestBuilder};
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Number, Value};
+use serde_with::{serde_as, NoneAsEmptyString};
 use tokio::sync::RwLock;
 
 type SymbolId = u32;
@@ -589,6 +590,7 @@ pub struct AccountActivity {
     pub activity_type: String,
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct AccountOrder {
     /// Internal order identifier.
@@ -676,7 +678,7 @@ pub struct AccountOrder {
     /// Human readable order rejection reason message.
     #[serde(rename = "clientReasonStr")]
     #[serde(alias = "rejectionReason")]
-    #[serde(deserialize_with = "serde_with::rust::string_empty_as_none::deserialize")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub rejection_reason: Option<String>,
 
     /// Internal identifier of a chain to which the order belongs.
@@ -692,14 +694,14 @@ pub struct AccountOrder {
     pub update_time: DateTime<Utc>,
 
     /// Notes that may have been manually added by Questrade staff.
-    #[serde(deserialize_with = "serde_with::rust::string_empty_as_none::deserialize")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub notes: Option<String>,
 
     #[serde(rename = "primaryRoute")]
     pub primary_route: String,
 
     #[serde(rename = "secondaryRoute")]
-    #[serde(deserialize_with = "serde_with::rust::string_empty_as_none::deserialize")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub secondary_route: Option<String>,
 
     /// Order route name.
@@ -708,7 +710,7 @@ pub struct AccountOrder {
 
     /// Venue where non-marketable portion of the order was booked.
     #[serde(rename = "venueHoldingOrder")]
-    #[serde(deserialize_with = "serde_with::rust::string_empty_as_none::deserialize")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub venue_holding_order: Option<String>,
 
     /// Total commission amount charged for this order.
@@ -857,6 +859,7 @@ pub enum OrderStateFilter {
 }
 
 /// An account execution.
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct AccountExecution {
     ///Internal identifier of the execution.
@@ -891,7 +894,7 @@ pub struct AccountExecution {
     pub timestamp: DateTime<Utc>,
 
     /// Notes that may have been manually added by Questrade staff.
-    #[serde(deserialize_with = "serde_with::rust::string_empty_as_none::deserialize")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub notes: Option<String>,
 
     /// Questrade commission.
@@ -1022,6 +1025,7 @@ pub struct AccountPosition {
 // region markets
 
 /// Spot quote for a certain Equity
+#[serde_as]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct MarketQuote {
     /// Symbol name following Questrade’s symbology.
@@ -1032,7 +1036,7 @@ pub struct MarketQuote {
     pub symbol_id: SymbolId,
 
     /// Market tier.
-    #[serde(deserialize_with = "serde_with::rust::string_empty_as_none::deserialize")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub tier: Option<String>, //FIXME - enumeration
 
     /// Bid price.
