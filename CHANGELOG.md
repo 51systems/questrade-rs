@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2022-09-15
+### Changed
+- Returned futures are now `Send` (thanks jlabath)
+- `ApiError`s now returned rather than `Box<dyn Error>` (thanks jlabath)
+
 ## [0.2.0] - 2021-09-26
 ### Changed
 - `tokio` dependency updated to v1
